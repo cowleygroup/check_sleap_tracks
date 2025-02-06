@@ -295,7 +295,7 @@ if True:
 
 
 ## save inds in text file
-if False:
+if True:
 	with open('./' + h5_filename[:-3] + '_uncertain_frames.txt', 'w') as file:
 
 		file.write('Uncertain frames for {:s}\n'.format(h5_filename))
