@@ -126,8 +126,6 @@ def get_relative_positions(positions_centric_fly, positions_noncentric_fly):
 	#	relative_positions: (2,3,T) for (x/y, head/body/tail, num_timepoints), relative positions of noncentric_fly with respect to centric_fly. 
 	#		Same format as positions_centric_fly and positions_noncentric_fly.
 	
-	num_flies = len(positions_centric_fly)
-
 	upward_dir = np.array([0,1])
 	rightward_dir = np.array([1,0])
 
@@ -139,7 +137,7 @@ def get_relative_positions(positions_centric_fly, positions_noncentric_fly):
 	angles = np.arccos(np.dot(upward_dir, head_dirs)) * np.sign(np.dot(rightward_dir, head_dirs))
 
 	# rotate relative positions 
-	num_timepoints = relative_positions.shape[1]
+	num_timepoints = relative_positions.shape[2]
 	for itime in range(num_timepoints):
 		R = np.array([[np.cos(angles[itime]), -np.sin(angles[itime])], [np.sin(angles[itime]), np.cos(angles[itime])]])
 		relative_positions[:,0,itime] = np.dot(R, relative_positions[:,0,itime])
@@ -295,7 +293,7 @@ if True:
 
 
 ## save inds in text file
-if True:
+if False:
 	with open('./' + h5_filename[:-3] + '_uncertain_frames.txt', 'w') as file:
 
 		file.write('Uncertain frames for {:s}\n'.format(h5_filename))
@@ -415,7 +413,7 @@ if True:
 
 		relative_positions = get_relative_positions(positions_centric_fly=X_tracks[imale], positions_noncentric_fly=X_tracks[ifemale])
 
-		plt.hexbin(relative_positions[0,1,:], relative_positions[1,1,:], gridsize=50, cmap='Reds', edgecolor='none')
+		plt.hexbin(relative_positions[0,1,:], relative_positions[1,1,:], bins='log', cmap='Reds', edgecolor='none')
 
 		plt.text(0,0,'^', horizontalalignment='center', verticalalignment='center', color='b')
 		plt.text(0,0,'|', horizontalalignment='center', verticalalignment='center', color='b')
@@ -434,7 +432,7 @@ if True:
 
 		relative_positions = get_relative_positions(positions_centric_fly=X_tracks[ifemale], positions_noncentric_fly=X_tracks[imale])
 
-		plt.hexbin(relative_positions[0,1,:], relative_positions[1,1,:], gridsize=50, cmap='Blues', edgecolor='none')
+		plt.hexbin(relative_positions[0,1,:], relative_positions[1,1,:], bins='log', cmap='Blues', edgecolor='none')
 
 		plt.text(0,0,'^', horizontalalignment='center', verticalalignment='center', color='b')
 		plt.text(0,0,'|', horizontalalignment='center', verticalalignment='center', color='b')
