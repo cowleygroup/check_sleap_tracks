@@ -1,11 +1,11 @@
 
 
 # Script to check output of the sleap tracks, and make sure there are not large errors:
-#	- large jumps (and switching identity between animals)
-#	- large changes in head dir (error in identifying head-body orientation)
-#	- large backwards walking (another sign sleap has wrong orientation)
-#	- large wing extensions (error in animal identity; also barrel rolls from flies)
-#	- any NaN frames (these can usually be interpolated automatically with post-processing)
+# 	- large jumps (and switching identity between animals)
+# 	- large changes in head dir (error in identifying head-body orientation)
+# 	- large backwards walking (another sign sleap has wrong orientation)
+# 	- large wing extensions (error in animal identity; also barrel rolls from flies)
+# 	- any NaN frames (these can usually be interpolated automatically with post-processing)
 
 # This script will only look at the .h5 file emitted from sleap (not the .slp file).
 
@@ -14,19 +14,28 @@
 
 # This script will save a .txt file (in the same directory) with the frame indices of uncertain frames, grouped.
 # It will display the top 20 frames for each group (e.g., largest jumps, etc.), as well as
-#	all frames with NaNs.
+# 	all frames with NaNs.
 # It will likely suffice to check the top 5 frames for each category and see what mistakes sleap is making.
 #  ---> There may be ways to automatically correct these errors with post-processing, especially
-#	if proofreading takes too long.
+# 	if proofreading takes too long.
 # NOTE: The indices are not unique across groups, so there may be duplicates (e.g., a large jump and large change in head dir).
-#
+
+# This script will also produce 6 useful plots describing position and courtship behavior.
+# This includes:
+#	- male-to-female distance over time
+#	- male/female velocity magnitude over time
+#	- male/female position density (mostly on the edge of the chamber)
+#	- male/female egocentric density (ego fly is in middle facing upwards;
+#			we expect female to mostly be directly in front of male)
+
 # Also includes ability to plot the tracks at different frames. This will save .pdfs in same directory
-#	where each pdf is one frame:
-#	plot_tracks_for_frame(X, np.arange(iframe-10,iframe+10)) # saves 20 frames
+# 	where each pdf is one frame:
+# 	plot_tracks_for_frame(X, np.arange(iframe-10,iframe+10)) # saves 20 frames
 # This is helpful to see the tracks over time from sleap.
-#
+# (This is optional and needs to be activated to work.)
+
 # written by Ben Cowley, cowley@cshl.edu
-#	Jan 2025.
+# 	Jan 2025.
 
 import numpy as np
 import h5py
@@ -36,6 +45,7 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from matplotlib.patches import Circle
+from matplotlib.patches import Ellipse
 
 
 ### HELPER FUNCTIONS
@@ -101,6 +111,47 @@ def plot_tracks_for_frame(X, frames):
 
 
 
+def get_relative_positions(positions_centric_fly, positions_noncentric_fly):
+	# helper function to plot egocentric position densities
+	# Difference in positions and rotated in respect to the centric fly (i.e., the fly in the center)
+	#
+	# Inputs:
+	#	positions_centric_fly: (2,3,T) for (x/y, head/body/tail, num_timepoints) joint positions of centric fly (i.e., the fly who will be in the center and whose
+	#		head direction will be facing upwards). Same format as for male_positions and female_positions. 
+	#		See documentation for plot_distance_over_time.
+	#	positions_noncentric_fly: (2,3,T) for (x/y, head/body/tail, num_timepoints), joint positions noncentric fly (fly whose position is of interest relative to
+	#		the perspective of the centric fly). Same format as positions_centric_fly.
+	#
+	# Outputs:
+	#	relative_positions: (2,3,T) for (x/y, head/body/tail, num_timepoints), relative positions of noncentric_fly with respect to centric_fly. 
+	#		Same format as positions_centric_fly and positions_noncentric_fly.
+	
+	num_flies = len(positions_centric_fly)
+
+	upward_dir = np.array([0,1])
+	rightward_dir = np.array([1,0])
+
+	relative_positions = positions_noncentric_fly - positions_centric_fly[:,1,:][:,np.newaxis,:]
+
+	head_dirs = positions_centric_fly[:,0,:] - positions_centric_fly[:,1,:]
+	head_dirs = head_dirs / (np.sqrt(np.sum(head_dirs**2,axis=0))+1e-5)  # normalize to have length 1
+
+	angles = np.arccos(np.dot(upward_dir, head_dirs)) * np.sign(np.dot(rightward_dir, head_dirs))
+
+	# rotate relative positions 
+	num_timepoints = relative_positions.shape[1]
+	for itime in range(num_timepoints):
+		R = np.array([[np.cos(angles[itime]), -np.sin(angles[itime])], [np.sin(angles[itime]), np.cos(angles[itime])]])
+		relative_positions[:,0,itime] = np.dot(R, relative_positions[:,0,itime])
+		relative_positions[:,1,itime] = np.dot(R, relative_positions[:,1,itime])
+
+	return relative_positions
+
+
+
+
+
+
 ### MAIN SCRIPT
 
 
@@ -132,8 +183,8 @@ if True:
 		# (2,N) for female/male and N frames
 		# score of 0 --> ground truth label
 
-	X = np.array(data['tracks'])
-	X[:,1,:,:] = 960-X[:,1,:,:]  # flips y to be correctly oriented with videos
+	X_tracks = np.array(data['tracks'])
+	X_tracks[:,1,:,:] = 960-X_tracks[:,1,:,:]  # flips y to be correctly oriented with videos
 	#		(2,2,3,N) where:
 	#		tracks[i,:,:,:] --> female if i=0, male if i=1
 	#		tracks[:,j,:,:] --> x if i=0, y if i=1
@@ -142,12 +193,12 @@ if True:
 
 	data.close()
 
-	num_frames = X.shape[-1]
+	num_frames = X_tracks.shape[-1]
 
 	ix=0; iy=1;
 	ihead=0; ibody=1; ileft_wing=2; iright_wing=3
 
-	indices_nan_tracks = np.isnan(np.sum(X[:,:,:,:], axis=(0,1,2)))
+	indices_nan_tracks = np.isnan(np.sum(X_tracks[:,:,:,:], axis=(0,1,2)))
 
 	indices_human_labels = np.isnan(np.sum(scores[:,:], axis=0)) * ~indices_nan_tracks
 
@@ -155,7 +206,7 @@ if True:
 ## check for nans/human labels
 if True:
 	print('X tracks shape:')
-	print(X.shape)
+	print(X_tracks.shape)
 
 	print('number of total frames = {:d}'.format(num_frames))
 
@@ -167,15 +218,15 @@ if True:
 
 	print('number of human labels: {:d}'.format(np.sum(indices_human_labels)))
 
-	inds_nan_frames = np.flatnonzero(indices_nan_tracks)
+	inds_nan_frames = np.flatnonzero(indices_nan_tracks) + 1  # add one b/c frames in video are indexed starting at 1
 
 
 ## check for jumps
 if True:
 	frames_jumps = []
 
-	dists_female = np.sqrt(np.sum((X[ifemale,:,ibody,1:] - X[ifemale,:,ibody,:-1])**2,axis=0))
-	dists_male = np.sqrt(np.sum((X[imale,:,ibody,1:] - X[imale,:,ibody,:-1])**2,axis=0))
+	dists_female = np.sqrt(np.sum((X_tracks[ifemale,:,ibody,1:] - X_tracks[ifemale,:,ibody,:-1])**2,axis=0))
+	dists_male = np.sqrt(np.sum((X_tracks[imale,:,ibody,1:] - X_tracks[imale,:,ibody,:-1])**2,axis=0))
 
 	dists = np.concatenate([dists_female[np.newaxis,:], dists_male[np.newaxis,:]], axis=0)
 	dists = np.max(dists,axis=0)
@@ -190,11 +241,11 @@ if True:
 if True:
 	angs_head_dir_female = np.zeros((num_frames-1,))
 	for iframe in range(num_frames-1):
-		angs_head_dir_female[iframe] = compute_angle_head_dir(X[ifemale,:,:,iframe], X[ifemale,:,:,iframe+1])
+		angs_head_dir_female[iframe] = compute_angle_head_dir(X_tracks[ifemale,:,:,iframe], X_tracks[ifemale,:,:,iframe+1])
 
 	angs_head_dir_male = np.zeros((num_frames-1,))
 	for iframe in range(num_frames-1):
-		angs_head_dir_male[iframe] = compute_angle_head_dir(X[imale,:,:,iframe], X[imale,:,:,iframe+1])
+		angs_head_dir_male[iframe] = compute_angle_head_dir(X_tracks[imale,:,:,iframe], X_tracks[imale,:,:,iframe+1])
 
 	angs_head_dir = np.concatenate([angs_head_dir_female[np.newaxis,:], angs_head_dir_male[np.newaxis,:]], axis=0)
 	angs_head_dir[np.isnan(angs_head_dir)] = 0.
@@ -210,15 +261,15 @@ if True:
 
 	## female
 	for iframe in range(num_frames-1):
-		head_dir = compute_head_dir(X[ifemale,:,:,iframe])
-		vel_dir = X[ifemale,:,ibody,iframe+1] - X[ifemale,:,ibody,iframe]
+		head_dir = compute_head_dir(X_tracks[ifemale,:,:,iframe])
+		vel_dir = X_tracks[ifemale,:,ibody,iframe+1] - X_tracks[ifemale,:,ibody,iframe]
 
 		projs_head_dir_vs_vel[ifemale,iframe] = np.sum(head_dir * vel_dir)
 
 	## male
 	for iframe in range(num_frames-1):
-		head_dir = compute_head_dir(X[imale,:,:,iframe])
-		vel_dir = X[imale,:,ibody,iframe+1] - X[imale,:,ibody,iframe]
+		head_dir = compute_head_dir(X_tracks[imale,:,:,iframe])
+		vel_dir = X_tracks[imale,:,ibody,iframe+1] - X_tracks[imale,:,ibody,iframe]
 
 		projs_head_dir_vs_vel[imale,iframe] = np.sum(head_dir * vel_dir)
 
@@ -231,8 +282,8 @@ if True:
 if True:
 	dists_between_wings = np.zeros((2,num_frames))
 
-	dists_between_wings[0] = np.sqrt(np.sum((X[ifemale,:,2,:] - X[ifemale,:,3,:])**2,axis=0))
-	dists_between_wings[1] = np.sqrt(np.sum((X[imale,:,2,:] - X[imale,:,3,:])**2,axis=0))
+	dists_between_wings[0] = np.sqrt(np.sum((X_tracks[ifemale,:,2,:] - X_tracks[ifemale,:,3,:])**2,axis=0))
+	dists_between_wings[1] = np.sqrt(np.sum((X_tracks[imale,:,2,:] - X_tracks[imale,:,3,:])**2,axis=0))
 
 	if np.nanmax(dists_between_wings[0]) > np.nanmax(dists_between_wings[1]):
 		print('!!! WARNING: Sex of fly may be mixed up...first fly appears to have wing extensions for song? !!!')
@@ -244,7 +295,7 @@ if True:
 
 
 ## save inds in text file
-if True:
+if False:
 	with open('./' + h5_filename[:-3] + '_uncertain_frames.txt', 'w') as file:
 
 		file.write('Uncertain frames for {:s}\n'.format(h5_filename))
@@ -294,3 +345,107 @@ if True:
 			seconds = np.mod(np.floor(time),60)
 			file.write('{:d}, {:d}:{:02.0f}:{:02.0f}\n'.format(iframe, hrs, mins, seconds))
 		file.write('\n')
+
+
+## in single pdf, make helpful plots to track behavior
+if True:
+	f = plt.figure(figsize=(10,10))
+
+	## male-female distance over time
+	if True:
+		plt.subplot(3,2,1)
+
+		mf_dists = np.sqrt(np.sum((X_tracks[imale,:,ibody,:] - X_tracks[ifemale,:,ibody,:])**2, axis=0))
+
+		plt.plot(np.arange(mf_dists.size)*(1/60)/60, mf_dists, '-k')
+
+		plt.xlabel('time (min)')
+		plt.ylabel('male-female distance (pixels)')
+
+	## male/female velocity magnitude over time
+	if True:
+		 plt.subplot(3,2,2)
+
+		 vel_mag_male = np.sqrt(np.sum((X_tracks[imale,:,ibody,1:] - X_tracks[imale,:,ibody,:-1])**2, axis=0)) * (1/60)
+		 vel_mag_female = np.sqrt(np.sum((X_tracks[ifemale,:,ibody,1:] - X_tracks[ifemale,:,ibody,:-1])**2, axis=0)) * (1/60)
+		 times = np.arange(vel_mag_male.size)*(1/60)/60
+
+		 plt.plot(times, vel_mag_male, '-b', label='male', alpha=0.7)
+		 plt.plot(times, vel_mag_female, '-r', label='female', alpha=0.7)
+
+		 plt.xlabel('time (min)')
+		 plt.ylabel('velocity magnitude (pixels/sec)')
+		 plt.legend()
+
+		 plt.ylim([0,0.5])
+
+	## density position male
+	if True:
+		plt.subplot(3,2,3)
+
+		X_tracks[np.isnan(X_tracks)] = 0.
+		plt.hexbin(X_tracks[imale,0,ibody,:], X_tracks[imale,1,ibody,:], bins='log', cmap='Blues', edgecolor='none')
+
+		plt.xlabel('x position')
+		plt.ylabel('y position')
+		plt.title('density of male body position')
+		plt.axis('square')
+
+		plt.xlim([200,900])
+		plt.ylim([50,750])
+
+	## density position female
+	if True:
+		plt.subplot(3,2,4)
+
+		X_tracks[np.isnan(X_tracks)] = 0.
+		plt.hexbin(X_tracks[ifemale,0,ibody,:], X_tracks[ifemale,1,ibody,:], bins='log', cmap='Reds', edgecolor='none')
+		
+		plt.xlabel('x position')
+		plt.ylabel('y position')
+		plt.title('density of female body position')
+		plt.axis('square')
+
+		plt.xlim([200,900])
+		plt.ylim([50,750])
+
+	## egocentric male density
+	if True:
+		plt.subplot(3,2,5)
+
+		relative_positions = get_relative_positions(positions_centric_fly=X_tracks[imale], positions_noncentric_fly=X_tracks[ifemale])
+
+		plt.hexbin(relative_positions[0,1,:], relative_positions[1,1,:], gridsize=50, cmap='Reds', edgecolor='none')
+
+		plt.text(0,0,'^', horizontalalignment='center', verticalalignment='center', color='b')
+		plt.text(0,0,'|', horizontalalignment='center', verticalalignment='center', color='b')
+
+		plt.xlabel('x position')
+		plt.ylabel('y position')
+		plt.title('egocentric male')
+		plt.axis('square')
+
+		plt.xlim([-350,350])
+		plt.ylim([-350,350])
+
+	## egocentric female density
+	if True:
+		plt.subplot(3,2,6)
+
+		relative_positions = get_relative_positions(positions_centric_fly=X_tracks[ifemale], positions_noncentric_fly=X_tracks[imale])
+
+		plt.hexbin(relative_positions[0,1,:], relative_positions[1,1,:], gridsize=50, cmap='Blues', edgecolor='none')
+
+		plt.text(0,0,'^', horizontalalignment='center', verticalalignment='center', color='b')
+		plt.text(0,0,'|', horizontalalignment='center', verticalalignment='center', color='b')
+
+		plt.xlabel('x position')
+		plt.ylabel('y position')
+		plt.title('egocentric female')
+		plt.axis('square')
+
+		plt.xlim([-350,350])
+		plt.ylim([-350,350])
+
+	plt.tight_layout()
+	f.savefig('./' + h5_filename[:-3] + '_plots.pdf')
